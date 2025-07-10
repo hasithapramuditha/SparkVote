@@ -29,10 +29,27 @@ const RegisterPage: React.FC = () => {
         if (user) {
             navigate('/dashboard');
         } else {
-            setError('Username may already be taken.');
+            setError('Registration failed.');
         }
     } catch (err: any) {
-        setError(err.message || 'Registration failed.');
+        // Use error.response from apiRequest for detailed error info
+        let msg = 'Registration failed.';
+        if (err && err.response) {
+          const errorObj = err.response;
+          if (errorObj.errors && Array.isArray(errorObj.errors) && errorObj.errors.length > 0) {
+            // Prefer password or username errors
+            const passwordErr = errorObj.errors.find((e: any) => e.path === 'password');
+            const usernameErr = errorObj.errors.find((e: any) => e.path === 'username');
+            if (passwordErr) msg = passwordErr.msg;
+            else if (usernameErr) msg = usernameErr.msg;
+            else msg = errorObj.errors[0].msg;
+          } else if (errorObj.message) {
+            msg = errorObj.message;
+          }
+        } else if (err && err.message) {
+          msg = err.message;
+        }
+        setError(msg);
     }
     setLoading(false);
   };
