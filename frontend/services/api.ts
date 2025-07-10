@@ -63,7 +63,10 @@ const apiRequest = async <T>(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+    // Attach the full error object for frontend parsing
+    const error = new Error(errorData.message || `HTTP error! status: ${response.status}`);
+    (error as any).response = errorData;
+    throw error;
   }
 
   return response.json();
@@ -99,8 +102,8 @@ export const apiRegister = async (username: string, password: string, email?: st
     }
     return null;
   } catch (error) {
-    console.error('Register error:', error);
-    return null;
+    // Re-throw error so the registration page can handle it
+    throw error;
   }
 };
 

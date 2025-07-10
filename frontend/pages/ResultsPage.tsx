@@ -42,6 +42,8 @@ const ResultsPage: React.FC = () => {
   const [votingCountdown, setVotingCountdown] = useState<string>('');
   const [votingStatus, setVotingStatus] = useState<string>('');
   const [savingWeights, setSavingWeights] = useState<{ [groupId: string]: boolean }>({});
+  const [hiddenGroups, setHiddenGroups] = useState<{ [groupId: string]: boolean }>({});
+  const [prevWeights, setPrevWeights] = useState<{ [groupId: string]: number }>({});
 
   // Debounced save function
   const saveWeightTimeoutRef = useRef<{ [groupId: string]: NodeJS.Timeout }>({});
@@ -72,6 +74,39 @@ const ResultsPage: React.FC = () => {
       }
       setSavingWeights(prev => ({ ...prev, [groupId]: false }));
     }, 1000); // Save after 1 second of no changes
+  };
+
+  // Sync hiddenGroups and prevWeights with backend weights after polling
+  useEffect(() => {
+    if (resultsData && resultsData.results && resultsData.results.groups) {
+      const newHiddenGroups: { [groupId: string]: boolean } = {};
+      const newPrevWeights: { [groupId: string]: number } = { ...prevWeights };
+      resultsData.results.groups.forEach((group: any) => {
+        const id = group.id || group._id;
+        const weight = groupWeights[id] !== undefined ? groupWeights[id] : group.weight;
+        newHiddenGroups[id] = weight === 0;
+        // If group is not hidden and weight is not zero, update prevWeights
+        if (weight > 0) {
+          newPrevWeights[id] = weight;
+        }
+      });
+      setHiddenGroups(newHiddenGroups);
+      setPrevWeights(newPrevWeights);
+    }
+    // eslint-disable-next-line
+  }, [resultsData, groupWeights]);
+
+  const handleHideShowGroup = (groupId: string) => {
+    const isHidden = (groupWeights[groupId] || 0) === 0;
+    if (isHidden) {
+      // Show: restore previous weight or backend value
+      const restoreWeight = prevWeights[groupId] || groupWeights[groupId] || 50;
+      handleWeightChange(groupId, restoreWeight);
+    } else {
+      // Hide: store current weight, set to zero
+      setPrevWeights((pw) => ({ ...pw, [groupId]: groupWeights[groupId] || 50 }));
+      handleWeightChange(groupId, 0);
+    }
   };
 
   useEffect(() => {
@@ -343,9 +378,12 @@ const ResultsPage: React.FC = () => {
                       <tr className="border-b">
                         <th className="p-2">Rank</th>
                         <th className="p-2">Project</th>
-                        {groupList.map(group => (
-                          <th key={group.id} className="p-2 text-right">{group.name} Avg</th>
-                        ))}
+                        {groupList.map(group => {
+                          const isHidden = (groupWeights[group.id] || group.weight || 0) === 0;
+                          return isHidden ? null : (
+                            <th key={group.id} className="p-2 text-right">{group.name} Avg</th>
+                          );
+                        })}
                         <th className="p-2 text-right">Final Score</th>
                       </tr>
                     </thead>
@@ -359,13 +397,17 @@ const ResultsPage: React.FC = () => {
                             </div>
                           </td>
                           <td className="p-4">{project.name}</td>
-                          {groupList.map(group => (
-                            <td key={group.id} className="p-4 text-right font-mono">
-                              {project.groupAverages && project.groupAverages[group.name] !== undefined
-                                ? project.groupAverages[group.name].toFixed(2)
-                                : '-'}
-                            </td>
-                          ))}
+                          {groupList.map(group => {
+                            const isHidden = (groupWeights[group.id] || group.weight || 0) === 0;
+                            if (isHidden) return null;
+                            return (
+                              <td key={group.id} className="p-4 text-right font-mono">
+                                {project.groupAverages && project.groupAverages[group.name] !== undefined
+                                  ? project.groupAverages[group.name].toFixed(2)
+                                  : '-'}
+                              </td>
+                            );
+                          })}
                           <td className="p-4 text-right font-mono">{project.finalScore.toFixed(2)}</td>
                         </tr>
                       ))}
@@ -391,34 +433,46 @@ const ResultsPage: React.FC = () => {
                 <h2 className="text-2xl font-semibold mb-4">Group Weights & Votes</h2>
                 <div className="space-y-6">
                   {resultsData && resultsData.results && resultsData.results.groups ? (
-                    resultsData.results.groups.map((group: any) => (
-                      <div key={group.id}>
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="font-medium">{group.name}</span>
-                          <span className="text-sm text-gray-600 font-medium">
-                            Voters: {group.voterCount || 0}
-                          </span>
-                        </div>
-                        <div className="flex items-center space-x-3">
-                          <input
+                    resultsData.results.groups.map((group: any) => {
+                      const isHidden = (groupWeights[group.id] || group.weight || 0) === 0;
+                      return (
+                        <div key={group.id} className={isHidden ? 'opacity-50' : ''}>
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="font-medium">{group.name}</span>
+                            <span className="text-sm text-gray-600 font-medium">
+                              Voters: {group.voterCount || 0}
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-3">
+                            <input
                               type="range"
                               min="0"
                               max="100"
                               value={groupWeights[group.id] || group.weight || 0}
                               onChange={(e) => handleWeightChange(group.id, parseInt(e.target.value))}
                               className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                              disabled={isHidden}
                             />
-                          <div className="flex items-center space-x-2">
-                            <span className="font-bold w-16 text-center text-blue-600 bg-blue-50 rounded-md py-1">
-                              {groupWeights[group.id] || group.weight || 0}%
-                            </span>
-                            {savingWeights[group.id] && (
-                              <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            )}
+                            <div className="flex items-center space-x-2">
+                              <span className="font-bold w-16 text-center text-blue-600 bg-blue-50 rounded-md py-1">
+                                {groupWeights[group.id] || group.weight || 0}%
+                              </span>
+                              {savingWeights[group.id] && (
+                                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                              )}
+                              <button
+                                type="button"
+                                className={`ml-2 px-2 py-1 rounded text-xs font-semibold border ${isHidden ? 'bg-gray-200 text-gray-500 border-gray-300' : 'bg-yellow-100 text-yellow-700 border-yellow-400'}`}
+                                onClick={() => handleHideShowGroup(group.id)}
+                              >
+                                {isHidden ? 'Show' : 'Hide'}
+                              </button>
+                            </div>
                           </div>
+                          {isHidden && <div className="text-xs text-gray-500 mt-1">Hidden (excluded from totals)</div>}
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <p className="text-gray-500">No group data available</p>
                   )}
